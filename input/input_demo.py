@@ -415,4 +415,4 @@ class MainWidget1(BaseWidget) :
         self.input_buffers = []
 
 # pass in which MainWidget to run as a command-line arg
-run(MainWidget1)
+# run(MainWidget1)
