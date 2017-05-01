@@ -61,7 +61,9 @@ class MainWidget(BaseWidget) :
 
         self.canvas.add(BackgroundDisplay())
 
-        self.info = topleft_label()
+        self.info = Label(valign='top', font_size='20sp',
+              pos=(Window.width * 0.5, Window.height * 0.4),
+              text_size=(Window.width, Window.height), color=(0,0,0,1))
         self.add_widget(self.info)
 
         # Get data
@@ -94,7 +96,6 @@ class MainWidget(BaseWidget) :
 
     def on_update(self) :
         self.beat_match.on_update()
-        self.info.text = 'score:%d' % self.score
         self.beat_match.on_pitch(self.cur_pitch)
 
         self.audio_ctrl.on_update()
@@ -116,10 +117,12 @@ class MainWidget(BaseWidget) :
         print self.cur_pitch
 
         cur_note = self.gem_data[self.current_note_idx][1]
+        role = self.gem_data[self.current_note_idx][2]
+        self.info.text = 'score:%d\n' % self.score
         self.info.text += "Current Note to Sing: " + str(cur_note) + "\n"
         self.info.text += "Current Singing Note: " + str(self.cur_pitch)
         # print self.cur_pitch, cur_note
-        if cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch):
+        if role == 1 and (cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch)):
             self.beat_match.on_pitch(self.cur_pitch)
             print True
             self.score += 1
@@ -229,6 +232,7 @@ class GemDisplay(InstructionGroup):
             self.rect_color.r = 0
             self.rect_color.g = 1
             self.rect_color.b = 0
+
 
 
     # change to display a passed gem
