@@ -27,12 +27,17 @@ BARLINES_FILEPATH = "data/fake_barlines.txt"
 VELOCITY = 200
 GRAVITY = -300
 GEM_SIZE = 40
-NOW_BAR_POS = 100
+NOW_BAR_POS = 200
 
 MAX_PITCH = 49 # preferably exclusive?
 MIN_PITCH = 32
 
 def pitch_to_height(pitch): # center of each gem
+    # while pitch > MAX_PITCH:
+    #     pitch -= 12
+    # while pitch < MIN_PITCH:
+    #     pitch += 12
+
     return 1. * (pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * Window.height
 
 def height_to_vel(height, new_height):
@@ -42,6 +47,8 @@ def height_to_vel(height, new_height):
 class MainWidget(BaseWidget) :
     def __init__(self):
         super(MainWidget, self).__init__()
+        # from kivy.core.window import Window
+        # Window.size = (1000, 600)
 
         self.channel_select = 0
         self.audio_ctrl = AudioController("ims_proj_song1.wav", self.receive_audio)
@@ -50,6 +57,7 @@ class MainWidget(BaseWidget) :
         self.current_note_idx = 0
         self.time = 0
         self.score = 0
+        self.note_score = 0
 
         self.info = topleft_label()
         self.add_widget(self.info)
@@ -103,6 +111,7 @@ class MainWidget(BaseWidget) :
         self.time = self.audio_ctrl.wave_file_gen.frame/44100.
         if self.gem_data[self.current_note_idx + 1][0] < self.time:
             self.current_note_idx += 1
+            self.note_score = 0
 
     def receive_audio(self, frames, num_channels) :
         # handle 1 or 2 channel input.
@@ -120,10 +129,12 @@ class MainWidget(BaseWidget) :
         self.info.text += "Current Singing Note: " + str(self.cur_pitch)
         # print self.cur_pitch, cur_note
         if cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch):
+            self.beat_match.on_pitch(self.cur_pitch)
             print True
             self.score += 1
+            self.note_score += 1
             print self.score
-            # self.color.rgb = (0,1,0)
+            self.beat_match.gems[self.current_note_idx].rect_color.rgb = (0,1,1.-self.note_score/15.0)
         else:
             print False
             # self.color.rgb = (0,0,0)
@@ -200,8 +211,10 @@ class SongData(object):
 
 # display for a single gem at a position with a color (if desired)
 class GemDisplay(InstructionGroup):
-    def __init__(self, pos, color):
+    def __init__(self, pos, color, role):
         super(GemDisplay, self).__init__()
+
+        self.role = role
 
         new_pos = (pos[0] - GEM_SIZE / 2, pos[1] - GEM_SIZE / 2)
 
@@ -219,8 +232,13 @@ class GemDisplay(InstructionGroup):
 
     # change to display this gem being hit
     def on_hit(self):
-        self.rect_color.r = 0
-        self.rect_color.g = 1
+        if self.role:
+            self.rect_color.rgb = (1,0,0)
+        else:
+            self.rect_color.r = 0
+            self.rect_color.g = 1
+            self.rect_color.b = 0
+
 
     # change to display a passed gem
     def on_pass(self):
@@ -396,7 +414,7 @@ class BeatMatchDisplay(InstructionGroup):
             color = (1,1,0)
             if role:
                 color = (1,0,1)
-            self.gems.append(GemDisplay(pos, color))  # TODO: they're all green rn
+            self.gems.append(GemDisplay(pos, color, role))
             self.add(self.gems[-1])
         self.barlines = []
         for time in self.barline_data:
