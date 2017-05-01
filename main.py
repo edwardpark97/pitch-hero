@@ -7,6 +7,7 @@ from common.mixer import *
 from common.wavegen import *
 from common.wavesrc import *
 from common.gfxutil import *
+from input.input_demo import *
 
 from kivy.graphics.instructions import InstructionGroup
 from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
@@ -20,7 +21,7 @@ import numpy as np
 import bisect
 from math import sqrt
 
-GEMS_FILEPATH = "data/fake_gems.txt"
+GEMS_FILEPATH = "notes_guide.txt"
 BARLINES_FILEPATH = "data/fake_barlines.txt"
 
 VELOCITY = 200
@@ -28,8 +29,8 @@ GRAVITY = -300
 GEM_SIZE = 40
 NOW_BAR_POS = 100
 
-MAX_PITCH = 70 # preferably exclusive?
-MIN_PITCH = 60
+MAX_PITCH = 49 # preferably exclusive?
+MIN_PITCH = 32
 
 def pitch_to_height(pitch): # center of each gem
     return 1. * (pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * Window.height
@@ -41,6 +42,14 @@ def height_to_vel(height, new_height):
 class MainWidget(BaseWidget) :
     def __init__(self):
         super(MainWidget, self).__init__()
+
+        self.channel_select = 0
+        self.audio_ctrl = AudioController("ims_proj_song1.wav", self.receive_audio)
+        self.pitch_detect = PitchDetector()
+        self.cur_pitch = 0
+        self.current_note_idx = 0
+        self.time = 0
+        self.score = 0
 
         self.info = topleft_label()
         self.add_widget(self.info)
@@ -57,6 +66,7 @@ class MainWidget(BaseWidget) :
         self.beat_match.toggle()
 
         # Create Player
+        # self.player = Player(self.gem_data, self.beat_match, self.audio_ctrl)
         self.player = Player(self.beat_match)
 
         self.pitch = (MAX_PITCH + MIN_PITCH) / 2
@@ -65,6 +75,7 @@ class MainWidget(BaseWidget) :
         # play / pause toggle
         if keycode[1] == 'p':
             self.beat_match.toggle()
+            self.audio_ctrl.toggle()
 
         if keycode[1] == 'up':
             self.pitch += .5
@@ -87,30 +98,74 @@ class MainWidget(BaseWidget) :
         self.info.text = 'score:%d' % self.player.get_score()
         self.beat_match.on_pitch(self.pitch)
 
+        self.audio_ctrl.on_update()
+        self.player.on_update()
+        self.time = self.audio_ctrl.wave_file_gen.frame/44100.
+        if self.gem_data[self.current_note_idx + 1][0] < self.time:
+            self.current_note_idx += 1
+
+    def receive_audio(self, frames, num_channels) :
+        # handle 1 or 2 channel input.
+        # if input is stereo, mono will pick left or right channel. This is used
+        # for input processing that must receive only one channel of audio (RMS, pitch, onset)
+        if num_channels == 2:
+            mono = frames[self.channel_select::2] # pick left or right channel
+        else:
+            mono = frames
+
+        self.cur_pitch = self.pitch_detect.write(mono)
+
+        cur_note = self.gem_data[self.current_note_idx][1]
+        self.info.text += "Current Note to Sing: " + str(cur_note) + "\n"
+        self.info.text += "Current Singing Note: " + str(self.cur_pitch)
+        # print self.cur_pitch, cur_note
+        if cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch):
+            print True
+            self.score += 1
+            print self.score
+            # self.color.rgb = (0,1,0)
+        else:
+            print False
+            # self.color.rgb = (0,0,0)
+
 
 # creates the Audio driver
 # creates a song and loads it with solo and bg audio tracks
 # creates snippets for audio sound fx
 class AudioController(object):
-    def __init__(self, song_path):
+    def __init__(self, song_path, receive_audio_callback):
         super(AudioController, self).__init__()
-        self.audio = Audio(2)
+        self.audio = Audio(2, input_func=receive_audio_callback)
+        self.mixer = Mixer()
+        self.io_buffer = IOBuffer()
+        self.mixer.add(self.io_buffer)
+        self.audio.set_generator(self.mixer)
+
+        self.wave_file_gen = WaveGenerator(WaveFile(song_path))
+        self.mixer.add(self.wave_file_gen)
+
+        self.paused = True
 
     # start / stop the song
     def toggle(self):
-        pass
+        if self.paused:
+            self.paused = False
+        else:
+            self.paused = True
 
     # mute / unmute the solo track
     def set_mute(self, mute):
-        pass
-
-    # play a sound-fx (miss sound)
-    def play_sfx(self):
-        pass
+        if mute:
+            self.wave_file_gen_solo.set_gain(0)
+        else:
+            self.wave_file_gen_solo.set_gain(1)
 
     # needed to update audio
     def on_update(self):
-        self.audio.on_update()
+        if not self.paused:
+            self.audio.on_update()
+        else:
+            pass
 
 
 # holds data for gems and barlines.
@@ -124,10 +179,12 @@ class SongData(object):
             tokens = line.strip().split("\t")
             time = float(tokens[0])
             pitch = int(float(tokens[1]))
+            role = int(tokens[2])
             if pitch < MIN_PITCH or pitch > MAX_PITCH:
                 # haven't processed this yet TODO
                 pitch = random.randint(MIN_PITCH + 1, MAX_PITCH - 1)
-            self.gems.append((time, pitch))
+
+            self.gems.append((time, pitch, role))
 
         for line in open(barline_filepath).readlines():
             tokens = line.strip().split("\t")
@@ -334,9 +391,12 @@ class BeatMatchDisplay(InstructionGroup):
 
         # Set up all gems and barlines
         self.gems = []
-        for time, pitch in self.gem_data:
+        for time, pitch, role in self.gem_data:
             pos = (NOW_BAR_POS + VELOCITY * time, pitch_to_height(pitch))
-            self.gems.append(GemDisplay(pos, (1,1,0)))  # TODO: they're all green rn
+            color = (1,1,0)
+            if role:
+                color = (1,0,1)
+            self.gems.append(GemDisplay(pos, color))  # TODO: they're all green rn
             self.add(self.gems[-1])
         self.barlines = []
         for time in self.barline_data:
