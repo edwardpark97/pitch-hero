@@ -59,6 +59,8 @@ class MainWidget(BaseWidget) :
         self.score = 0
         self.note_score = 0
 
+        self.canvas.add(BackgroundDisplay())
+
         self.info = topleft_label()
         self.add_widget(self.info)
 
@@ -73,22 +75,11 @@ class MainWidget(BaseWidget) :
 
         self.beat_match.toggle()
 
-        # Create Player
-        # self.player = Player(self.gem_data, self.beat_match, self.audio_ctrl)
-        self.player = Player(self.beat_match)
-
-        self.pitch = (MAX_PITCH + MIN_PITCH) / 2
-
     def on_key_down(self, keycode, modifiers):
         # play / pause toggle
         if keycode[1] == 'p':
             self.beat_match.toggle()
             self.audio_ctrl.toggle()
-
-        if keycode[1] == 'up':
-            self.pitch += .5
-        if keycode[1] == 'down':
-            self.pitch -= .5
 
         # button down
         button_idx = lookup(keycode[1], '12345', (0,1,2,3,4))
@@ -103,11 +94,10 @@ class MainWidget(BaseWidget) :
 
     def on_update(self) :
         self.beat_match.on_update()
-        self.info.text = 'score:%d' % self.player.get_score()
-        self.beat_match.on_pitch(self.pitch)
+        self.info.text = 'score:%d' % self.score
+        self.beat_match.on_pitch(self.cur_pitch)
 
         self.audio_ctrl.on_update()
-        self.player.on_update()
         self.time = self.audio_ctrl.wave_file_gen.frame/44100.
         if self.gem_data[self.current_note_idx + 1][0] < self.time:
             self.current_note_idx += 1
@@ -123,6 +113,7 @@ class MainWidget(BaseWidget) :
             mono = frames
 
         self.cur_pitch = self.pitch_detect.write(mono)
+        print self.cur_pitch
 
         cur_note = self.gem_data[self.current_note_idx][1]
         self.info.text += "Current Note to Sing: " + str(cur_note) + "\n"
@@ -395,7 +386,6 @@ class BeatMatchDisplay(InstructionGroup):
 
         # Set up background and nowbar
         self.add(NowBarDisplay())
-        self.add(BackgroundDisplay())
 
         # Set up arrow and ball
         self.arrow = ArrowDisplay()
@@ -441,6 +431,8 @@ class BeatMatchDisplay(InstructionGroup):
 
     # called by Player. Causes the right thing to happen
     def on_pitch(self, pitch):
+        # TODO: fix
+        pitch = pitch - 12
         self.arrow.on_height(pitch_to_height(pitch))
 
     # call every frame to make gems and barlines flow down the screen
@@ -458,28 +450,14 @@ class BeatMatchDisplay(InstructionGroup):
             self.needs_update = keep
 
 
-# Handles game logic and keeps score.
-# Controls the display and the audio
-class Player(object):
-    def __init__(self, display):
-        super(Player, self).__init__()
-        self.display = display
-        # self.gems = display.get_gems()
+# # Handles game logic and keeps score.
+# # Controls the display and the audio
+# class Player(object):
+#     def __init__(self, display):
+#         super(Player, self).__init__()
 
-        self.idx = 0
-
-        self.score = 0
-
-    # called by MainWidget
-    def on_pitch(self, pitch):
-        self.display.on_pitch(pitch)
-
-    # needed to check if for pass gems (ie, went past the slop window)
-    def on_update(self):
-        pass
-
-    # returns the score
-    def get_score(self):
-        return self.score
+#     # needed to check if for pass gems (ie, went past the slop window)
+#     def on_update(self):
+#         pass
 
 run(MainWidget)
