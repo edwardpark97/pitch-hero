@@ -114,7 +114,15 @@ class MainWidget(BaseWidget) :
             mono = frames
 
         self.cur_pitch = self.pitch_detect.write(mono)
-        print self.cur_pitch
+        # print self.cur_pitch
+
+        rms = np.sqrt(np.mean(mono ** 2))
+        rms = np.clip(rms, 1e-10, 1) # don't want log(0)
+        db = 20 * np.log10(rms)      # convert from amplitude to decibels 
+        db += 60
+        
+        if db < 15:
+            self.cur_pitch = 0
 
         cur_note = self.gem_data[self.current_note_idx][1]
         role = self.gem_data[self.current_note_idx][2]
