@@ -15,6 +15,7 @@ from kivy.graphics import PushMatrix, PopMatrix, Translate, Scale, Rotate
 from kivy.core.image import Image
 from kivy.core.window import Window
 from kivy.clock import Clock as kivyClock
+from common.kivyparticle import ParticleSystem
 
 import random
 import numpy as np
@@ -29,15 +30,12 @@ GRAVITY = -300
 GEM_SIZE = 40
 NOW_BAR_POS = 200
 
+AUDIO_DELAY = 0.2
+
 MAX_PITCH = 49 # preferably exclusive?
 MIN_PITCH = 32
 
 def pitch_to_height(pitch): # center of each gem
-    # while pitch > MAX_PITCH:
-    #     pitch -= 12
-    # while pitch < MIN_PITCH:
-    #     pitch += 12
-
     return 1. * (pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * Window.height
 
 def height_to_vel(height, new_height):
@@ -47,8 +45,6 @@ def height_to_vel(height, new_height):
 class MainWidget(BaseWidget) :
     def __init__(self):
         super(MainWidget, self).__init__()
-        # from kivy.core.window import Window
-        # Window.size = (1000, 600)
 
         self.channel_select = 0
         self.audio_ctrl = AudioController("ims_proj_song1.wav", self.receive_audio)
@@ -75,6 +71,11 @@ class MainWidget(BaseWidget) :
         self.beat_match = BeatMatchDisplay(self.gem_data, self.barline_data)
         self.canvas.add(self.beat_match)
 
+        self.octave = 12
+        self.streak = 0
+        self.multiplier = 1
+        self.hit_all_notes_in_phrase = True
+
         self.beat_match.toggle()
 
     def on_key_down(self, keycode, modifiers):
@@ -83,26 +84,32 @@ class MainWidget(BaseWidget) :
             self.beat_match.toggle()
             self.audio_ctrl.toggle()
 
-        # button down
-        button_idx = lookup(keycode[1], '12345', (0,1,2,3,4))
-        if button_idx != None:
-            print 'down', button_idx
-
-    def on_key_up(self, keycode):
-        # button up
-        button_idx = lookup(keycode[1], '12345', (0,1,2,3,4))
-        if button_idx != None:
-            print 'up', button_idx
+        if keycode[1] == 'up':
+            self.octave += 12
+        if keycode[1] == 'down':
+            self.octave -= 12
 
     def on_update(self) :
         self.beat_match.on_update()
-        self.beat_match.on_pitch(self.cur_pitch)
-
+        self.beat_match.arrow.on_pitch(self.cur_pitch - self.octave)
         self.audio_ctrl.on_update()
+
         self.time = self.audio_ctrl.wave_file_gen.frame/44100.
-        if self.gem_data[self.current_note_idx + 1][0] < self.time:
+        if self.gem_data[self.current_note_idx + 1][0] + AUDIO_DELAY < self.time:
+            # figure out streak and multiplier
+            if self.beat_match.gems[self.current_note_idx].role:
+                if not self.beat_match.gems[self.current_note_idx].was_sung:
+                    self.multiplier = 1
+                    self.hit_all_notes_in_phrase = False
+                if self.beat_match.gems[self.current_note_idx + 1].role == 0:
+                    if self.hit_all_notes_in_phrase:
+                        self.multiplier += 1
+                    self.hit_all_notes_in_phrase = True
+            # go to next note
             self.current_note_idx += 1
-            self.note_score = 0
+
+        self.info.text = 'score:%d\n' % self.score
+        self.info.text += 'multiplier:%d\n' % self.multiplier
 
     def receive_audio(self, frames, num_channels) :
         # handle 1 or 2 channel input.
@@ -113,33 +120,20 @@ class MainWidget(BaseWidget) :
         else:
             mono = frames
 
+        # Get the pitch correctly
         self.cur_pitch = self.pitch_detect.write(mono)
-        # print self.cur_pitch
-
         rms = np.sqrt(np.mean(mono ** 2))
         rms = np.clip(rms, 1e-10, 1) # don't want log(0)
         db = 20 * np.log10(rms)      # convert from amplitude to decibels 
         db += 60
-        
         if db < 15:
             self.cur_pitch = 0
 
+        # Deal with scoring
         cur_note = self.gem_data[self.current_note_idx][1]
         role = self.gem_data[self.current_note_idx][2]
-        self.info.text = 'score:%d\n' % self.score
-        self.info.text += "Current Note to Sing: " + str(cur_note) + "\n"
-        self.info.text += "Current Singing Note: " + str(self.cur_pitch)
-        # print self.cur_pitch, cur_note
-        if role == 1 and (cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch)):
-            self.beat_match.on_pitch(self.cur_pitch)
-            print True
-            self.score += 1
-            self.note_score += 1
-            print self.score
-            self.beat_match.gems[self.current_note_idx].rect_color.rgb = (0,1,1.-self.note_score/15.0)
-        else:
-            print False
-            # self.color.rgb = (0,0,0)
+        if role and (cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch)):
+            self.score += self.multiplier * self.beat_match.gems[self.current_note_idx].on_sing()
 
 
 # creates the Audio driver
@@ -177,8 +171,6 @@ class AudioController(object):
     def on_update(self):
         if not self.paused:
             self.audio.on_update()
-        else:
-            pass
 
 
 # holds data for gems and barlines.
@@ -196,12 +188,9 @@ class SongData(object):
             if pitch < MIN_PITCH or pitch > MAX_PITCH:
                 # haven't processed this yet TODO
                 pitch = random.randint(MIN_PITCH + 1, MAX_PITCH - 1)
-
             self.gems.append((time, pitch, role))
 
-        for line in open(barline_filepath).readlines():
-            tokens = line.strip().split("\t")
-            time = float(tokens[0])
+        for time in range(0, int(self.gems[-1][0]), 2):
             self.barlines.append(time)
 
     def get_gems(self):
@@ -217,6 +206,7 @@ class GemDisplay(InstructionGroup):
         super(GemDisplay, self).__init__()
 
         self.role = role
+        self.score = 0
 
         new_pos = (pos[0] - GEM_SIZE / 2, pos[1] - GEM_SIZE / 2)
 
@@ -232,25 +222,36 @@ class GemDisplay(InstructionGroup):
         self.rect = RoundedRectangle(pos=new_pos, size=(GEM_SIZE, GEM_SIZE))
         self.add(self.rect)
 
-    # change to display this gem being hit
+        self.time = 0
+        self.was_sung = False
+
+    # change to display this gem being hit by the ball
     def on_hit(self):
-        if self.role:
-            self.rect_color.rgb = (1,0,0)
-        else:
-            self.rect_color.r = 0
-            self.rect_color.g = 1
-            self.rect_color.b = 0
+        if not self.role:
+            self.rect_color.rgb = (0,1,0)
 
-
-
-    # change to display a passed gem
-    def on_pass(self):
-        self.rect_color.r = 1
-        self.rect_color.g = 0
+    # change to display this gem being sung correctly
+    # returns 1 if this is first time being sung, 0 otherwise
+    def on_sing(self):
+        self.score += 1
+        # if self.score > 2:
+        self.rect_color.a = 1
+        self.border_color.a = 1
+        self.rect_color.rgb = (0,1,1.-self.score/15.0)
+        if not self.was_sung:
+            self.was_sung = True
+            return 1
+        return 0
 
     # useful if gem is to animate
     def on_update(self, dt):
-        pass
+        if self.role and not self.was_sung:
+            self.time += dt
+            if self.time > AUDIO_DELAY:
+                self.rect_color.a -= 2 * dt
+                self.border_color.a -= 2 * dt
+            return self.rect_color.a > 0
+        return False
 
 
 # Stolen pretty blatantly from gfxutil.py
@@ -301,7 +302,8 @@ class ArrowDisplay(InstructionGroup):
         self.add(self.line)
 
     # displays when you update the pitch of the arrow
-    def on_height(self, height):
+    def on_pitch(self, pitch):
+        height = pitch_to_height(pitch)
         self.image.set_cpos((NOW_BAR_POS - GEM_SIZE/2 - 20, height))
         self.line.points = (NOW_BAR_POS - GEM_SIZE/2, height, Window.width, height)
 
@@ -345,6 +347,7 @@ class BallDisplay(InstructionGroup):
         self.gem_data = gem_data
         self.callback = callback
         self.idx = 0    # the index of the next gem we're looking to hit
+        self.callback_idx = 0
 
         self.time = 0
 
@@ -387,7 +390,6 @@ class BallDisplay(InstructionGroup):
         self.border.circle = (self.pos[0], self.pos[1], GEM_SIZE/2)
         self.ball.cpos = self.pos
 
-
 # Displays and controls all game elements: Nowbar, Buttons, BarLines, Gems.
 class BeatMatchDisplay(InstructionGroup):
     def __init__(self, gem_data, barline_data):
@@ -422,7 +424,6 @@ class BeatMatchDisplay(InstructionGroup):
         for time in self.barline_data:
             self.barlines.append(BarLineDisplay(NOW_BAR_POS + VELOCITY * time))
             self.add(self.barlines[-1])
-        print self.barlines
 
         self.playing = True
         self.needs_update = []
@@ -436,16 +437,11 @@ class BeatMatchDisplay(InstructionGroup):
     # called by Player. Causes the right thing to happen
     def gem_hit(self, gem_idx):
         self.gems[gem_idx].on_hit()
+        self.needs_update.append(self.gems[gem_idx])
 
     # called by Player. Causes the right thing to happen
     def gem_pass(self, gem_idx):
         self.gems[gem_idx].on_pass()
-
-    # called by Player. Causes the right thing to happen
-    def on_pitch(self, pitch):
-        # TODO: fix
-        pitch = pitch - 12
-        self.arrow.on_height(pitch_to_height(pitch))
 
     # call every frame to make gems and barlines flow down the screen
     def on_update(self) :
@@ -460,16 +456,5 @@ class BeatMatchDisplay(InstructionGroup):
                 if obj.on_update(dt):
                     keep.append(obj)
             self.needs_update = keep
-
-
-# # Handles game logic and keeps score.
-# # Controls the display and the audio
-# class Player(object):
-#     def __init__(self, display):
-#         super(Player, self).__init__()
-
-#     # needed to check if for pass gems (ie, went past the slop window)
-#     def on_update(self):
-#         pass
 
 run(MainWidget)
