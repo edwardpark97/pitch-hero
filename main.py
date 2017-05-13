@@ -16,10 +16,10 @@ from kivy.core.image import Image
 from kivy.core.window import Window
 from kivy.clock import Clock as kivyClock
 from common.kivyparticle import ParticleSystem
+from kivy.uix.popup import Popup
 
 import random
 import numpy as np
-import bisect
 from math import sqrt
 
 GEMS_FILEPATH = "notes_guide.txt"
@@ -30,10 +30,12 @@ GRAVITY = -300
 GEM_SIZE = 40
 NOW_BAR_POS = 200
 
-AUDIO_DELAY = 0.2
+AUDIO_DELAY = 0.0
 
 MAX_PITCH = 49 # preferably exclusive?
 MIN_PITCH = 32
+PITCHES = [(36, 'C'), (40, 'E'), (43, 'G'), (48, 'C')] # tonic, third, and fifth for c major
+TEMPO = 120
 
 def pitch_to_height(pitch): # center of each gem
     return 1. * (pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * Window.height
@@ -42,9 +44,21 @@ def height_to_vel(height, new_height):
     top_height = max(height, new_height) + 50
     return sqrt(abs(2 * GRAVITY * (top_height - height)))
 
+def clip(x, min, max):
+    if x < min:
+        return min
+    if x > max:
+        return max
+    return x
+
 class MainWidget(BaseWidget) :
     def __init__(self):
         super(MainWidget, self).__init__()
+
+        # popup = Popup(title='Test popup',
+        # content=Label(text='Hello world'),
+        # size_hint=(None, None), size=(400, 400))
+        # popup.open()
 
         self.channel_select = 0
         self.audio_ctrl = AudioController("ims_proj_song1.wav", self.receive_audio)
@@ -57,10 +71,12 @@ class MainWidget(BaseWidget) :
 
         self.canvas.add(BackgroundDisplay())
 
-        self.info = Label(valign='top', font_size='20sp',
-              pos=(Window.width * 0.5, Window.height * 0.4),
-              text_size=(Window.width, Window.height), color=(0,0,0,1))
-        self.add_widget(self.info)
+        self.score_label = Label(font_size='25sp', pos=(Window.width * 1.28, Window.height * 0.4),
+            text_size=(Window.width, Window.height), color=(0,0,0,1))
+        self.add_widget(self.score_label)
+        self.mult_label = Label(font_size='25sp', pos=(Window.width * 0.48, Window.height * 0.4),
+            text_size=(Window.width, Window.height), color=(0,0,0,1))
+        self.add_widget(self.mult_label)
 
         # Get data
         self.songdata = SongData(GEMS_FILEPATH, BARLINES_FILEPATH)
@@ -68,7 +84,7 @@ class MainWidget(BaseWidget) :
         self.barline_data = self.songdata.get_barlines()
 
         # Create beat_match
-        self.beat_match = BeatMatchDisplay(self.gem_data, self.barline_data)
+        self.beat_match = BeatMatchDisplay(self.gem_data, self.barline_data, self)
         self.canvas.add(self.beat_match)
 
         self.octave = 12
@@ -77,6 +93,8 @@ class MainWidget(BaseWidget) :
         self.hit_all_notes_in_phrase = True
 
         self.beat_match.toggle()
+
+        self.fireworks = []
 
     def on_key_down(self, keycode, modifiers):
         # play / pause toggle
@@ -88,28 +106,36 @@ class MainWidget(BaseWidget) :
             self.octave += 12
         if keycode[1] == 'down':
             self.octave -= 12
+        if keycode[1] == 'k':
+            self.fireworks.append(Fireworks((Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.06), True, self))
 
     def on_update(self) :
         self.beat_match.on_update()
         self.beat_match.arrow.on_pitch(self.cur_pitch - self.octave)
         self.audio_ctrl.on_update()
 
+        keep_list = []
+        for firework in self.fireworks:
+            if firework.on_update():
+                keep_list.append(firework)
+        self.fireworks = keep_list
+
         self.time = self.audio_ctrl.wave_file_gen.frame/44100.
         if self.gem_data[self.current_note_idx + 1][0] + AUDIO_DELAY < self.time:
-            # figure out streak and multiplier
+            # figure out hit_all_notes_in_phrase
             if self.beat_match.gems[self.current_note_idx].role:
                 if not self.beat_match.gems[self.current_note_idx].was_sung:
                     self.multiplier = 1
+                    self.beat_match.ball.update_multiplier(self.multiplier)
                     self.hit_all_notes_in_phrase = False
                 if self.beat_match.gems[self.current_note_idx + 1].role == 0:
-                    if self.hit_all_notes_in_phrase:
-                        self.multiplier += 1
                     self.hit_all_notes_in_phrase = True
+
             # go to next note
             self.current_note_idx += 1
 
-        self.info.text = 'score:%d\n' % self.score
-        self.info.text += 'multiplier:%d\n' % self.multiplier
+        self.score_label.text = 'Score:%d\n' % self.score
+        self.mult_label.text = 'Multiplier:%d\n' % self.multiplier
 
     def receive_audio(self, frames, num_channels) :
         # handle 1 or 2 channel input.
@@ -132,8 +158,15 @@ class MainWidget(BaseWidget) :
         # Deal with scoring
         cur_note = self.gem_data[self.current_note_idx][1]
         role = self.gem_data[self.current_note_idx][2]
-        if role and (cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch)):
-            self.score += self.multiplier * self.beat_match.gems[self.current_note_idx].on_sing()
+        # if role and (cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch)):
+        if role: 
+            if self.beat_match.gems[self.current_note_idx].on_sing():
+                self.score += self.multiplier
+                self.fireworks.append(Fireworks(self.beat_match.gems[self.current_note_idx].pos, False, self))
+                if self.beat_match.gems[self.current_note_idx + 1].role == 0 and self.hit_all_notes_in_phrase:
+                    self.multiplier += 1
+                    self.beat_match.ball.update_multiplier(self.multiplier)
+                    self.fireworks.append(Fireworks((Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.06), True, self))
 
 
 # creates the Audio driver
@@ -190,8 +223,10 @@ class SongData(object):
                 pitch = random.randint(MIN_PITCH + 1, MAX_PITCH - 1)
             self.gems.append((time, pitch, role))
 
-        for time in range(0, int(self.gems[-1][0]), 2):
+        time = 0
+        while time < self.gems[-1][0]:
             self.barlines.append(time)
+            time += 4 * 60. / TEMPO
 
     def get_gems(self):
         return self.gems
@@ -206,7 +241,7 @@ class GemDisplay(InstructionGroup):
         super(GemDisplay, self).__init__()
 
         self.role = role
-        self.score = 0
+        self.pos = pos
 
         new_pos = (pos[0] - GEM_SIZE / 2, pos[1] - GEM_SIZE / 2)
 
@@ -231,17 +266,15 @@ class GemDisplay(InstructionGroup):
             self.rect_color.rgb = (0,1,0)
 
     # change to display this gem being sung correctly
-    # returns 1 if this is first time being sung, 0 otherwise
+    # returns true if this is first time being sung, false otherwise
     def on_sing(self):
-        self.score += 1
-        # if self.score > 2:
         self.rect_color.a = 1
         self.border_color.a = 1
-        self.rect_color.rgb = (0,1,1.-self.score/15.0)
+        self.rect_color.rgb = (0,1,0)
         if not self.was_sung:
             self.was_sung = True
-            return 1
-        return 0
+            return True
+        return False
 
     # useful if gem is to animate
     def on_update(self, dt):
@@ -280,7 +313,7 @@ class CRectangle(Rectangle):
 class BackgroundDisplay(InstructionGroup):
     def __init__(self):
         super(BackgroundDisplay, self).__init__()
-        Window.clearcolor = (1, 1, 1, 1)
+        Window.clearcolor = (.7, .7, .7, 1)
         self.add(Color(1, 1, 1, .5))
         self.add(Rectangle(pos=(0,0), size=(Window.width, Window.height), texture=Image('data/background.jpg').texture))
         self.add(Color(1, 1, 1, .8))
@@ -294,6 +327,7 @@ class ArrowDisplay(InstructionGroup):
 
         height = Window.height / 2
 
+        self.add(Color(0, 0, 0, .5))
         self.image = CRectangle(cpos=(NOW_BAR_POS - GEM_SIZE/2 - 20, height), csize=(40,30), texture=Image('data/arrow.png').texture)
         self.add(self.image)
 
@@ -312,7 +346,7 @@ class ArrowDisplay(InstructionGroup):
 class BarLineDisplay(InstructionGroup):
     def __init__(self, width):
         super(BarLineDisplay, self).__init__()
-        self.add(Color(0,0,0,.3))          # is black
+        self.add(Color(0,0,0,.2))          # is black
         self.add(Line(points=(width, 0, width, Window.height)))
 
 
@@ -323,12 +357,22 @@ class NowBarDisplay(InstructionGroup):
         self.add(Color(0,0,0,1))
         self.add(Line(points=(NOW_BAR_POS, 0, NOW_BAR_POS, Window.height), width=3))
 
+# display for the tonic, third, fifth
+class PitchBarDisplay(InstructionGroup):
+    def __init__(self, pitch, note):
+        super(PitchBarDisplay, self).__init__()
+        height = pitch_to_height(pitch)
+        self.add(Color(0,0,0,.2))
+        self.add(Line(points=(0, height, Window.width, height)))
+        self.label = Label(font_size="20sp", text_size=(100,100), pos=(10, height - 12), color=(0,0,0,.5), text=note)
+
+    def get_text(self):
+        return self.label
 
 # Displays the ball
 class BallDisplay(InstructionGroup):
     def __init__(self, gem_data, callback):
         super(BallDisplay, self).__init__()
-
         self.pos = (NOW_BAR_POS, self.pitch_to_ball_height(gem_data[0][1]))
         self.vel = 0
 
@@ -347,12 +391,18 @@ class BallDisplay(InstructionGroup):
         self.gem_data = gem_data
         self.callback = callback
         self.idx = 0    # the index of the next gem we're looking to hit
-        self.callback_idx = 0
 
         self.time = 0
 
+        # to do with color change
+        self.color_time = 0
+        self.mult = 1
+
     def pitch_to_ball_height(self, pitch):
         return pitch_to_height(pitch) + GEM_SIZE
+
+    def update_multiplier(self, mult):
+        self.mult = mult
 
     def on_update(self, dt):
         # TODO: beginning stuff, ending stuff
@@ -370,7 +420,7 @@ class BallDisplay(InstructionGroup):
             self.callback(self.idx)
             self.idx += 1
 
-        if self.idx == 0:
+        if self.idx == 0 or self.idx >= len(self.gem_data):
             return
 
         old_time = self.gem_data[self.idx - 1][0]
@@ -390,16 +440,33 @@ class BallDisplay(InstructionGroup):
         self.border.circle = (self.pos[0], self.pos[1], GEM_SIZE/2)
         self.ball.cpos = self.pos
 
+        # color for multiplier stuff
+        if self.mult > 1:
+            x = 60. / TEMPO * clip(10 - self.mult, 1, 10)
+            self.color_time = (self.color_time + dt / x) % 3
+            r = clip(1 - self.color_time if self.color_time < 2 else self.color_time - 2, 0, 1)
+            g = clip(1 - abs(self.color_time - 1), 0, 1)
+            b = clip(1 - abs(self.color_time - 2), 0, 1)
+        else:
+            r,g,b = (1,1,1)
+
+        self.ball_color.rgb = (r, g, b)
+        self.ball_color.a = 0.5
+
 # Displays and controls all game elements: Nowbar, Buttons, BarLines, Gems.
 class BeatMatchDisplay(InstructionGroup):
-    def __init__(self, gem_data, barline_data):
+    def __init__(self, gem_data, barline_data, widget):
         super(BeatMatchDisplay, self).__init__()
 
         self.gem_data = gem_data
         self.barline_data = barline_data
 
-        # Set up background and nowbar
+        # Set up nowbar
         self.add(NowBarDisplay())
+        for pitch, note in PITCHES:
+            pitchbar = PitchBarDisplay(pitch, note)
+            self.add(pitchbar)
+            widget.add_widget(pitchbar.get_text())
 
         # Set up arrow and ball
         self.arrow = ArrowDisplay()
@@ -456,5 +523,34 @@ class BeatMatchDisplay(InstructionGroup):
                 if obj.on_update(dt):
                     keep.append(obj)
             self.needs_update = keep
+
+class Fireworks(InstructionGroup):
+    def __init__(self, pos, is_fast, widget):
+        super(Fireworks, self).__init__()
+        self.ps = ParticleSystem('data/fireworks.pex')
+        self.ps.emitter_x = pos[0]
+        self.ps.emitter_y = pos[1]
+        self.ps.start()
+        self.basewidget = widget
+        self.basewidget.add_widget(self.ps)
+
+        if is_fast:
+            self.ps.start_color = (1,0,0,1)
+            self.ps.end_color = (1,0,0,0)
+            self.maxParticles = 200
+            self.ps.speed = 150
+            self.end_time = 60
+        else:
+            self.end_time = 30
+
+        self.time = 0
+
+    def on_update(self):
+        self.time += 1
+        if self.time > self.end_time:
+            self.ps.stop()
+        if self.time > 120:
+            self.basewidget.remove_widget(self.ps)
+        return True
 
 run(MainWidget)
