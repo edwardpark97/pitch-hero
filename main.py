@@ -17,6 +17,7 @@ from kivy.core.window import Window
 from kivy.clock import Clock as kivyClock
 from common.kivyparticle import ParticleSystem
 from kivy.uix.popup import Popup
+from kivy.uix.image import Image as Image2
 
 import random
 import numpy as np
@@ -95,6 +96,9 @@ class MainWidget(BaseWidget) :
         self.beat_match.toggle()
 
         self.fireworks = []
+
+        wimg = Image2(source='data/fireworks4.gif', anim_delay=.05, size=(100,100))
+        self.add_widget(wimg)
 
     def on_key_down(self, keycode, modifiers):
         # play / pause toggle
