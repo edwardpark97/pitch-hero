@@ -96,6 +96,7 @@ class MainWidget(BaseWidget) :
         self.beat_match.toggle()
 
         self.fireworks = []
+        self.add_fireworks = 0
 
         wimg = Image2(source='data/fireworks4.gif', anim_delay=.05, size=(100,100))
         self.add_widget(wimg)
@@ -110,8 +111,6 @@ class MainWidget(BaseWidget) :
             self.octave += 12
         if keycode[1] == 'down':
             self.octave -= 12
-        if keycode[1] == 'k':
-            self.fireworks.append(Fireworks((Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.06), True, self))
 
     def on_update(self) :
         self.beat_match.on_update()
@@ -162,16 +161,18 @@ class MainWidget(BaseWidget) :
         # Deal with scoring
         cur_note = self.gem_data[self.current_note_idx][1]
         role = self.gem_data[self.current_note_idx][2]
-        # if role and (cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch)):
-        if role: 
+        if role and (cur_note == round(self.cur_pitch) or cur_note + 12 == round(self.cur_pitch) or cur_note + 24 == round(self.cur_pitch)):
+        # if role: 
             if self.beat_match.gems[self.current_note_idx].on_sing():
                 self.score += self.multiplier
                 self.fireworks.append(Fireworks(self.beat_match.gems[self.current_note_idx].pos, False, self))
                 if self.beat_match.gems[self.current_note_idx + 1].role == 0 and self.hit_all_notes_in_phrase:
                     self.multiplier += 1
                     self.beat_match.ball.update_multiplier(self.multiplier)
-                    self.fireworks.append(Fireworks((Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.06), True, self))
-
+                    self.add_fireworks = 0
+        if self.add_fireworks < 5:
+            self.fireworks.append(Fireworks((Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.06), True, self))
+            self.add_fireworks += 1
 
 # creates the Audio driver
 # creates a song and loads it with solo and bg audio tracks
@@ -386,7 +387,7 @@ class BallDisplay(InstructionGroup):
         self.border = Line(circle=(self.pos[0], self.pos[1], GEM_SIZE/2))
         self.add(self.border)
 
-        self.ball_color = Color(1, 1, 1, .5)
+        self.ball_color = Color(1, 1, 1, 1)
         self.add(self.ball_color)
 
         self.ball = CEllipse(cpos=self.pos, csize=(GEM_SIZE, GEM_SIZE))
@@ -455,7 +456,7 @@ class BallDisplay(InstructionGroup):
             r,g,b = (1,1,1)
 
         self.ball_color.rgb = (r, g, b)
-        self.ball_color.a = 0.5
+        self.ball_color.a = 1
 
 # Displays and controls all game elements: Nowbar, Buttons, BarLines, Gems.
 class BeatMatchDisplay(InstructionGroup):
