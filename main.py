@@ -23,7 +23,7 @@ import random
 import numpy as np
 from math import sqrt
 
-GEMS_FILEPATH = "notes_guide.txt"
+GEMS_FILEPATH = "notes_guide"+sys.argv[1]+".txt"
 BARLINES_FILEPATH = "data/fake_barlines.txt"
 
 VELOCITY = 200
@@ -36,7 +36,7 @@ AUDIO_DELAY = 0.0
 MAX_PITCH = 49 # preferably exclusive?
 MIN_PITCH = 32
 PITCHES = [(36, 'C'), (40, 'E'), (43, 'G'), (48, 'C')] # tonic, third, and fifth for c major
-TEMPO = 120
+TEMPO = (120, 100)[int(sys.argv[1])-1]
 
 def pitch_to_height(pitch): # center of each gem
     return 1. * (pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * Window.height
@@ -62,7 +62,7 @@ class MainWidget(BaseWidget) :
         # popup.open()
 
         self.channel_select = 0
-        self.audio_ctrl = AudioController("ims_proj_song1.wav", self.receive_audio)
+        self.audio_ctrl = AudioController("ims_proj_song"+sys.argv[1]+".wav", self.receive_audio)
         self.pitch_detect = PitchDetector()
         self.cur_pitch = 0
         self.current_note_idx = 0
@@ -98,8 +98,12 @@ class MainWidget(BaseWidget) :
         self.fireworks = []
         self.add_fireworks = 0
 
-        wimg = Image2(source='data/fireworks4.gif', anim_delay=.05, size=(100,100))
+        wimg = Image2(source='data/fireworks3.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.5 - self.beat_match.translate.x, Window.height * 0.6), anim_loop=1)
+        wimg2 = Image2(source='data/fireworks2.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.5), anim_loop=1)
+        wimg3 = Image2(source='data/fireworks4.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.75 - self.beat_match.translate.x, Window.height * 0.25), anim_loop=1)
         self.add_widget(wimg)
+        self.add_widget(wimg2)
+        self.add_widget(wimg3)
 
     def on_key_down(self, keycode, modifiers):
         # play / pause toggle
@@ -124,7 +128,7 @@ class MainWidget(BaseWidget) :
         self.fireworks = keep_list
 
         self.time = self.audio_ctrl.wave_file_gen.frame/44100.
-        if self.gem_data[self.current_note_idx + 1][0] + AUDIO_DELAY < self.time:
+        if self.current_note_idx < len(self.gem_data) - 1 and self.gem_data[self.current_note_idx + 1][0] + AUDIO_DELAY < self.time:
             # figure out hit_all_notes_in_phrase
             if self.beat_match.gems[self.current_note_idx].role:
                 if not self.beat_match.gems[self.current_note_idx].was_sung:
@@ -166,10 +170,20 @@ class MainWidget(BaseWidget) :
             if self.beat_match.gems[self.current_note_idx].on_sing():
                 self.score += self.multiplier
                 self.fireworks.append(Fireworks(self.beat_match.gems[self.current_note_idx].pos, False, self))
-                if self.beat_match.gems[self.current_note_idx + 1].role == 0 and self.hit_all_notes_in_phrase:
+                if self.current_note_idx < len(self.beat_match.gems) - 1 and self.beat_match.gems[self.current_note_idx + 1].role == 0 and self.hit_all_notes_in_phrase:
                     self.multiplier += 1
                     self.beat_match.ball.update_multiplier(self.multiplier)
                     self.add_fireworks = 0
+                    wimg = Image2(source='data/fireworks3.gif', anim_delay=.05, size=(150,150), pos=(Window.width * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
+                    wimg2 = Image2(source='data/fireworks2.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.25 * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
+                    wimg3 = Image2(source='data/fireworks4.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.75 * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
+                    wimg4 = Image2(source='data/fireworks3.gif', anim_delay=.05, size=(150,150), pos=(Window.width * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
+                    wimg5 = Image2(source='data/fireworks2.gif', anim_delay=.05, size=(150,150), pos=(Window.width * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
+                    self.add_widget(wimg)
+                    self.add_widget(wimg2)
+                    self.add_widget(wimg3)
+                    self.add_widget(wimg4)
+                    self.add_widget(wimg5)
         if self.add_fireworks < 5:
             self.fireworks.append(Fireworks((Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.06), True, self))
             self.add_fireworks += 1
@@ -430,6 +444,7 @@ class BallDisplay(InstructionGroup):
 
         old_time = self.gem_data[self.idx - 1][0]
         new_time = self.gem_data[self.idx][0]
+
         old_height = self.pitch_to_ball_height(self.gem_data[self.idx - 1][1])
         new_height = self.pitch_to_ball_height(self.gem_data[self.idx][1])
         old_vel = height_to_vel(old_height, new_height)
