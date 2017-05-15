@@ -24,19 +24,21 @@ import numpy as np
 from math import sqrt
 
 GEMS_FILEPATH = "notes_guide"+sys.argv[1]+".txt"
-BARLINES_FILEPATH = "data/fake_barlines.txt"
+AUDIO_FILEPATH = "ims_proj_song"+sys.argv[1]+".wav"
+BACKGROUND_FILEPATH = "data/background"+sys.argv[1]+".jpg"
+
+MAX_PITCH = (49, 45)[int(sys.argv[1])-1] # preferably exclusive?
+MIN_PITCH = (32, 30)[int(sys.argv[1])-1]
+PITCHES = ([(36, 'C'), (40, 'E'), (43, 'G'), (48, 'C')], \
+    [(31, 'G'), (35, 'B'), (40, 'E'), (43, 'G')])[int(sys.argv[1])-1] # tonic, third, and fifth for c major / e minor
+TEMPO = (120, 100)[int(sys.argv[1])-1]
 
 VELOCITY = 200
 GRAVITY = -300
 GEM_SIZE = 40
 NOW_BAR_POS = 200
-
 AUDIO_DELAY = 0.0
 
-MAX_PITCH = 49 # preferably exclusive?
-MIN_PITCH = 32
-PITCHES = [(36, 'C'), (40, 'E'), (43, 'G'), (48, 'C')] # tonic, third, and fifth for c major
-TEMPO = (120, 100)[int(sys.argv[1])-1]
 
 def pitch_to_height(pitch): # center of each gem
     return 1. * (pitch - MIN_PITCH) / (MAX_PITCH - MIN_PITCH) * Window.height
@@ -56,19 +58,24 @@ class MainWidget(BaseWidget) :
     def __init__(self):
         super(MainWidget, self).__init__()
 
-        # popup = Popup(title='Test popup',
-        # content=Label(text='Hello world'),
-        # size_hint=(None, None), size=(400, 400))
-        # popup.open()
+        instructions = "Welcome to Pitchhero!\n"
+        instructions += "Sing the notes that correspond to the blocks\n"
+        instructions += "Listen to the yellow blocks, sing the magenta blocks\n"
+        instructions += "Get all the notes in a phrase to increase your multiplier!\n"
+        instructions += "Press 'm' for the male octave, 'f' for the female octave\n"
+        instructions += "Press 'p' to toggle pause/play\n"
+        instructions += "Click outside this box to and press 'p' to start!\n"
+
+        popup = Popup(title='Instructions', content=Label(text=instructions), size_hint=(None, None), size=(400, 400))
+        popup.open()
 
         self.channel_select = 0
-        self.audio_ctrl = AudioController("ims_proj_song"+sys.argv[1]+".wav", self.receive_audio)
+        self.audio_ctrl = AudioController(AUDIO_FILEPATH, self.receive_audio)
         self.pitch_detect = PitchDetector()
         self.cur_pitch = 0
         self.current_note_idx = 0
         self.time = 0
         self.score = 0
-        self.note_score = 0
 
         self.canvas.add(BackgroundDisplay())
 
@@ -80,7 +87,7 @@ class MainWidget(BaseWidget) :
         self.add_widget(self.mult_label)
 
         # Get data
-        self.songdata = SongData(GEMS_FILEPATH, BARLINES_FILEPATH)
+        self.songdata = SongData(GEMS_FILEPATH)
         self.gem_data = self.songdata.get_gems()
         self.barline_data = self.songdata.get_barlines()
 
@@ -96,7 +103,6 @@ class MainWidget(BaseWidget) :
         self.beat_match.toggle()
 
         self.fireworks = []
-        self.add_fireworks = 0
 
         wimg = Image2(source='data/fireworks3.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.5 - self.beat_match.translate.x, Window.height * 0.6), anim_loop=1)
         wimg2 = Image2(source='data/fireworks2.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.5), anim_loop=1)
@@ -115,6 +121,10 @@ class MainWidget(BaseWidget) :
             self.octave += 12
         if keycode[1] == 'down':
             self.octave -= 12
+        if keycode[1] == 'm':
+            self.octave = 12
+        if keycode[1] == 'f':
+            self.octave = 24
 
     def on_update(self) :
         self.beat_match.on_update()
@@ -173,7 +183,6 @@ class MainWidget(BaseWidget) :
                 if self.current_note_idx < len(self.beat_match.gems) - 1 and self.beat_match.gems[self.current_note_idx + 1].role == 0 and self.hit_all_notes_in_phrase:
                     self.multiplier += 1
                     self.beat_match.ball.update_multiplier(self.multiplier)
-                    self.add_fireworks = 0
                     wimg = Image2(source='data/fireworks3.gif', anim_delay=.05, size=(150,150), pos=(Window.width * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
                     wimg2 = Image2(source='data/fireworks2.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.25 * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
                     wimg3 = Image2(source='data/fireworks4.gif', anim_delay=.05, size=(150,150), pos=(Window.width * 0.75 * random.random() - self.beat_match.translate.x, Window.height * random.random()), anim_loop=1)
@@ -184,9 +193,6 @@ class MainWidget(BaseWidget) :
                     self.add_widget(wimg3)
                     self.add_widget(wimg4)
                     self.add_widget(wimg5)
-        if self.add_fireworks < 5:
-            self.fireworks.append(Fireworks((Window.width * 0.25 - self.beat_match.translate.x, Window.height * 0.06), True, self))
-            self.add_fireworks += 1
 
 # creates the Audio driver
 # creates a song and loads it with solo and bg audio tracks
@@ -227,7 +233,7 @@ class AudioController(object):
 
 # holds data for gems and barlines.
 class SongData(object):
-    def __init__(self, filepath, barline_filepath):
+    def __init__(self, filepath):
         super(SongData, self).__init__()
         self.gems = []
         self.barlines = []
@@ -237,9 +243,6 @@ class SongData(object):
             time = float(tokens[0])
             pitch = int(float(tokens[1]))
             role = int(tokens[2])
-            if pitch < MIN_PITCH or pitch > MAX_PITCH:
-                # haven't processed this yet TODO
-                pitch = random.randint(MIN_PITCH + 1, MAX_PITCH - 1)
             self.gems.append((time, pitch, role))
 
         time = 0
@@ -334,7 +337,7 @@ class BackgroundDisplay(InstructionGroup):
         super(BackgroundDisplay, self).__init__()
         Window.clearcolor = (.7, .7, .7, 1)
         self.add(Color(1, 1, 1, .5))
-        self.add(Rectangle(pos=(0,0), size=(Window.width, Window.height), texture=Image('data/background.jpg').texture))
+        self.add(Rectangle(pos=(0,0), size=(Window.width, Window.height), texture=Image(BACKGROUND_FILEPATH).texture))
         self.add(Color(1, 1, 1, .8))
         self.add(Rectangle(pos=(0,380), size=(Window.width, Window.height - 300), texture=Image('data/logo.png').texture))
 
@@ -401,7 +404,7 @@ class BallDisplay(InstructionGroup):
         self.border = Line(circle=(self.pos[0], self.pos[1], GEM_SIZE/2))
         self.add(self.border)
 
-        self.ball_color = Color(1, 1, 1, 1)
+        self.ball_color = Color(1, 1, 1, .7)
         self.add(self.ball_color)
 
         self.ball = CEllipse(cpos=self.pos, csize=(GEM_SIZE, GEM_SIZE))
@@ -471,7 +474,7 @@ class BallDisplay(InstructionGroup):
             r,g,b = (1,1,1)
 
         self.ball_color.rgb = (r, g, b)
-        self.ball_color.a = 1
+        self.ball_color.a = .7
 
 # Displays and controls all game elements: Nowbar, Buttons, BarLines, Gems.
 class BeatMatchDisplay(InstructionGroup):
